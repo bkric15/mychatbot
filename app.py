@@ -81,7 +81,7 @@ os.makedirs(DATA_FOLDER, exist_ok=True)
 # ---------------------------------------------------------
 # Parsing List Model dari .env
 # ---------------------------------------------------------
-raw_models = os.getenv("GOOGLE_MODEL", '["gemini-1.5-flash", "gemini-1.5-pro"]')
+raw_models = os.getenv("GOOGLE_MODEL", '["gemini-1.5-flash", "gemini-3.5-flash"]')
 try:
     model_list = json.loads(raw_models)
     if not isinstance(model_list, list):
