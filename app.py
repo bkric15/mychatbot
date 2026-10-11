@@ -3,10 +3,22 @@ import json
 import streamlit as st
 from dotenv import load_dotenv
 
-# Load environment variables (.env)
+# ---------------------------------------------------------
+# Load Environment Variables (Lokal .env / Google Colab)
+# ---------------------------------------------------------
 load_dotenv()
 
-# LangChain Imports
+# Jika GOOGLE_API_KEY belum ada di environment, coba ambil dari Colab Secrets
+if not os.getenv("GOOGLE_API_KEY"):
+    try:
+        from google.colab import userdata
+        os.environ["GOOGLE_API_KEY"] = userdata.get("GEMINI")
+    except (ImportError, Exception):
+        pass
+
+# ---------------------------------------------------------
+# LangChain & SDK Imports
+# ---------------------------------------------------------
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
@@ -16,29 +28,24 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.embeddings import Embeddings
 
-# Google GenAI SDK Resmi
 from google import genai
 from google.genai import types
 
 # ---------------------------------------------------------
-# Custom Embedding Wrapper Menggunakan SDK `google-genai` (v1 Stable)
+# Custom Embedding Wrapper (Google GenAI SDK v1)
 # ---------------------------------------------------------
 class SafeGoogleEmbeddings(Embeddings):
-    """Wrapper kustom berbasis SDK google-genai dengan paksaan API version 'v1'."""
     def __init__(self):
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY tidak ditemukan di file .env")
+            raise ValueError("GOOGLE_API_KEY tidak ditemukan. Pastikan sudah diatur di Secrets Colab / .env")
         
-        # Paksa penggunaan API version v1 (stable)
         self.client = genai.Client(
             api_key=api_key,
             http_options={'api_version': 'v1'}
         )
 
     def _embed_single_text(self, text: str, task_type: str) -> list[float]:
-        """Memanggil API embedding dengan fallback kandidat model resmi."""
-        # Daftar model embedding yang valid pada API v1
         models_to_try = ["gemini-embedding-001", "models/text-embedding-004", "embedding-001"]
         last_exception = None
 
@@ -78,10 +85,8 @@ st.title("📚 Chatbot AI Berbasis PDF (Google Gemini)")
 DATA_FOLDER = "data"
 os.makedirs(DATA_FOLDER, exist_ok=True)
 
-# ---------------------------------------------------------
-# Parsing List Model dari .env
-# ---------------------------------------------------------
-raw_models = os.getenv("GOOGLE_MODEL", '["gemini-1.5-flash", "gemini-3.5-flash"]')
+# Parsing List Model
+raw_models = os.getenv("GOOGLE_MODEL", '["gemini-2.5-flash", "gemini-2.5-pro"]')
 try:
     model_list = json.loads(raw_models)
     if not isinstance(model_list, list):
@@ -90,7 +95,7 @@ except Exception:
     model_list = [m.strip(" []\"'") for m in raw_models.split(",") if m.strip()]
 
 # ---------------------------------------------------------
-# Sidebar UI: Konfigurasi & Upload PDF
+# Sidebar UI: Konfigurasi, Upload & Hapus PDF
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ Konfigurasi System")
@@ -99,7 +104,7 @@ with st.sidebar:
     st.divider()
     st.header("📁 Kelola Dokumen PDF")
     
-    # Form upload file PDF
+    # Form Upload File PDF
     with st.form("upload_form", clear_on_submit=True):
         uploaded_files = st.file_uploader(
             "Upload file PDF baru:", 
@@ -116,28 +121,52 @@ with st.sidebar:
                 with open(file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
                 saved_count += 1
-            st.success(f"Berhasil menyimpan {saved_count} file ke folder `{DATA_FOLDER}/`!")
+            st.success(f"Berhasil menyimpan {saved_count} file!")
             st.cache_resource.clear()
             st.rerun()
         else:
             st.warning("Pilih minimal satu file PDF terlebih dahulu.")
 
     st.divider()
-    if st.button("🔄 Reload & Re-index Data"):
+    if st.button("🔄 Reload & Re-index Data", use_container_width=True):
         st.cache_resource.clear()
         st.success("Indeks berhasil diperbarui!")
         st.rerun()
 
+    st.divider()
     existing_files = [f for f in os.listdir(DATA_FOLDER) if f.lower().endswith(".pdf")]
     st.subheader(f"Daftar File PDF ({len(existing_files)}):")
+    
     if existing_files:
         for f in existing_files:
-            st.caption(f"• {f}")
+            col_filename, col_btn = st.columns([0.8, 0.2])
+            with col_filename:
+                st.caption(f"• {f}")
+            with col_btn:
+                # Tombol hapus file per item
+                if st.button("🗑️", key=f"del_{f}", help=f"Hapus {f}"):
+                    file_to_delete = os.path.join(DATA_FOLDER, f)
+                    if os.path.exists(file_to_delete):
+                        os.remove(file_to_delete)
+                        st.cache_resource.clear()
+                        st.toast(f"Berhasil menghapus `{f}`", icon="🗑️")
+                        st.rerun()
+
+        # Tombol untuk menghapus seluruh file sekaligus
+        st.write("")
+        if st.button("🚨 Hapus Semua PDF", type="secondary", use_container_width=True):
+            for f in existing_files:
+                file_to_delete = os.path.join(DATA_FOLDER, f)
+                if os.path.exists(file_to_delete):
+                    os.remove(file_to_delete)
+            st.cache_resource.clear()
+            st.toast("Semua file PDF berhasil dihapus!", icon="🗑️")
+            st.rerun()
     else:
         st.caption("Belum ada file PDF di folder `data/`.")
 
 # ---------------------------------------------------------
-# Fungsi Inisialisasi Vector Store (FAISS)
+# Inisialisasi Vector Store
 # ---------------------------------------------------------
 @st.cache_resource(show_spinner="Memproses & mengindeks seluruh file PDF...")
 def initialize_vector_store():
@@ -155,7 +184,6 @@ def initialize_vector_store():
     docs = text_splitter.split_documents(raw_documents)
 
     try:
-        # Panggil kustom embedding yang terhubung langsung ke SDK google-genai
         embeddings = SafeGoogleEmbeddings()
         vector_store = FAISS.from_documents(docs, embeddings)
         return vector_store
@@ -169,7 +197,7 @@ def format_docs(docs):
 vector_store = initialize_vector_store()
 
 # ---------------------------------------------------------
-# Tampilan Utama & Chat Logic (LCEL Architecture)
+# Tampilan Utama & Chat Logic
 # ---------------------------------------------------------
 if vector_store is None:
     st.info("💡 **Belum ada file PDF di dalam sistem.**")
