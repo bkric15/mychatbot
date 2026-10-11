@@ -88,7 +88,6 @@ Create a `.env` file in the root directory of the project:
 
 ```env
 GOOGLE_API_KEY=your_gemini_api_key_here
-PORT=8501
 GOOGLE_MODEL=["gemini-1.5-flash", "gemini-1.5-pro"]
 ```
 
