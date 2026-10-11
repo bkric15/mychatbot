@@ -58,7 +58,7 @@ Follow these instructions to set up and run the project on your local machine.
 #### 1. Clone the Repository
 ```bash
 git clone https://github.com/bkric15/mychatbot.git
-cd your-repo-name
+cd mychatbot
 ```
 
 #### 2. Create and Activate a Virtual Environment
